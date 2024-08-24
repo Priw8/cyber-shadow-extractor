@@ -1,9 +1,13 @@
 # Cyber Shadow extractor
 
-This is a tool to extract data from the `Assets.dat` file of [Cyber Shadow](https://store.steampowered.com/app/861250/Cyber_Shadow/). 
-It can probably be adjusted to also work with other games that make use of [Chowdren](https://mp2.dk/chowdren/), but due to the nature of the file
-format, reading it requires knowing hardcoded offsets in the game's binary. Because of that, it might not even work with all versions of Cyber Shadow.
-It works with my Linux version, but if you're having issues, you might need to reverse engineer your binary to find the offsets ¯\\\_(ツ)\_/¯
+This is a tool to extract data from the `Assets.dat` file of [Cyber Shadow](https://store.steampowered.com/app/861250/Cyber_Shadow/). As of the 
+2nd version, it now probes the `Assets.dat` file instead of relying on hardcoded offsets, which should increase compatibility with other games
+using this format (specifically I think it's games that use [Chowdren](https://mp2.dk/chowdren/) - so far I checked Petal Crash and it extracts fine).
+
+## TODO
+
+- Check compatibility with more games
+- Allow extracting files from the `font`, `files` and `platform` sections (what does `platform` even mean?) Cyber Shadow does not use them, but other games might (Petal Crash has non-empty `fonts`).
 
 ## What you need to build
 
@@ -26,6 +30,7 @@ Run `./cyber-shadow-extractor --help` for info.
 ```
 Usage: cyber-shadow-extractor [options] input.dat output-dir
 Named options:
+  --probe-offsets       only find offsets and exit
   --no-images           skip extracting images
   --no-audio            skip extracting audio
   --no-shaders          skip extracting shaders
@@ -110,3 +115,7 @@ struct AssetTypeSizes {
 ```
 
 After `type_sizes` begins the data pointed to by the offsets from earlier.
+
+### How the probing works
+
+TODO: describe this in the README. The code has a bunch of comments, so for now you can check that.
