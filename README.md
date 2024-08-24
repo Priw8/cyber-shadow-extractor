@@ -8,6 +8,8 @@ using this format (specifically I think it's games that use [Chowdren](https://m
 
 - Check compatibility with more games
 - Allow extracting files from the `font`, `files` and `platform` sections (what does `platform` even mean?) Cyber Shadow does not use them, but other games might (Petal Crash has non-empty `fonts`).
+- Support newer internal formats - notably, for Baba Is You Assets.dat the program fails to extract both images and sounds; only shaders are extracted. Images might be using a different (proprietary) compression format, as described [in a similar project](https://github.com/snickerbockers/fp-assets). As for the audio, my initial investigation suggests that it's still uncompressed, but the entry format is slightly different so it fails to find the data.
+- An option to extract the raw, compressed image data instead of constructing a png might be useful for debugging
 
 ## What you need to build
 
