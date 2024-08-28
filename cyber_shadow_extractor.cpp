@@ -44,6 +44,7 @@ For more information, please refer to <http://unlicense.org/>
 #include <iostream>
 #include <cstdio>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <zlib.h>
 
@@ -75,6 +76,14 @@ enum class image_format {
     CHOWIMG
 };
 
+// This refers to the format of entries in the archive,
+// not the format in the underlying audio container
+enum class sound_format {
+    INVALID,
+    LONG,       // Contains a bunch of extra metadata
+    SHORT       // Only contains underlying container type and size
+};
+
 image_format get_image_format(const std::string& name) {
     if (name == "zlib") {
         return image_format::ZLIB;
@@ -85,6 +94,31 @@ image_format get_image_format(const std::string& name) {
     } else {
         return image_format::INVALID;
     }
+}
+
+sound_format get_sound_format(const std::string& name) {
+    if (name == "long") {
+        return sound_format::LONG;
+    } else if (name == "short") {
+        return sound_format::SHORT;
+    } else {
+        return sound_format::INVALID;
+    }
+}
+
+struct sound_offsets {
+    uint32_t size;
+    uint32_t data;
+};
+
+const sound_offsets& get_sound_offsets(sound_format format) {
+    static const sound_offsets offsets_long =  {16, 20};
+    static const sound_offsets offsets_short = {4, 8};
+
+    if (format == sound_format::LONG)   return offsets_long;
+    if (format == sound_format::SHORT)  return offsets_short;
+
+    throw std::invalid_argument("get_sound_offsets: received invalid sound format");
 }
 
 int parse_args(po::variables_map& opts, int argc, char** argv) {
@@ -101,6 +135,14 @@ int parse_args(po::variables_map& opts, int argc, char** argv) {
             "- zlib (decompress with zlib)\n"
             "- chowimg (decompress using custom algorhitm)\n"
             "- raw (extract raw data without decompression)"
+        )
+        (
+            "sound-format",
+            po::value<std::string>()->default_value("long"),
+            "type of sound entries in the archive:\n"
+            "- long\n"
+            "- short\n"
+            "if you're unsure what format your archive has, try both and see which works"
         )
         (
             "no-images",
@@ -219,11 +261,13 @@ void extract_images(asset_offsets& offsets, uint8_t* mmap, const std::string& ou
     std::free(temp_buffer);
 }
 
-void extract_audio(asset_offsets& offsets, uint8_t* mmap, const std::string& output_dir_path) {
+void extract_audio(asset_offsets& offsets, uint8_t* mmap, const std::string& output_dir_path, sound_format format) {
     if (offsets.sounds == INVALID_OFFSET) {
         std::cerr << "failed to find sound offsets";
         return;
     }
+
+    const sound_offsets& sound_offsets = get_sound_offsets(format);
 
     int entry_number = 0;
     for (uint32_t i=offsets.sounds; i<offsets.fonts; i+=4) {
@@ -232,7 +276,7 @@ void extract_audio(asset_offsets& offsets, uint8_t* mmap, const std::string& out
                 //  unknown1     = read_little_endian_u32(mmap + entry_offset + 4), 
                 //  sample_rate  = read_little_endian_u32(mmap + entry_offset + 8);
         // uint8_t  unknown3     = *(mmap + entry_offset + 12);
-        uint32_t size         = read_little_endian_u32(mmap + entry_offset + 16);
+        uint32_t size         = read_little_endian_u32(mmap + entry_offset + sound_offsets.size);
         // std::cout << "Found audio of type=" << audio_type << std::endl;
 
         if (audio_type == 0) {
@@ -243,7 +287,7 @@ void extract_audio(asset_offsets& offsets, uint8_t* mmap, const std::string& out
             // std::cout << "Writing to " << filename << std::endl;
     
             FILE* out = std::fopen(filename.c_str(), "wb");
-            fwrite(mmap + entry_offset + 20, size, 1, out);
+            fwrite(mmap + entry_offset + sound_offsets.data, size, 1, out);
             fclose(out);
         }
         ++entry_number;
@@ -507,7 +551,8 @@ int main(int argc, char **argv) {
     }
     
     if (!opts.count("no-audio")) {
-        extract_audio(offsets, mmap, output_dir_path);
+        sound_format format = get_sound_format(opts["sound-format"].as<std::string>());
+        extract_audio(offsets, mmap, output_dir_path, format);
     }
 
     if (!opts.count("no-shaders")) {
