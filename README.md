@@ -8,8 +8,7 @@ using this format (specifically I think it's games that use [Chowdren](https://m
 
 - Check compatibility with more games
 - Allow extracting files from the `font`, `files` and `platform` sections (what does `platform` even mean?) Cyber Shadow does not use them, but other games might (Petal Crash has non-empty `fonts`).
-- Support newer internal formats - notably, for Baba Is You Assets.dat the program fails to extract both images and sounds; only shaders are extracted. Images might be using a different (proprietary) compression format, as described [in a similar project](https://github.com/snickerbockers/fp-assets). As for the audio, my initial investigation suggests that it's still uncompressed, but the entry format is slightly different so it fails to find the data.
-- An option to extract the raw, compressed image data instead of constructing a png might be useful for debugging
+- Support newer internal formats - notably, for Baba Is You Assets.dat the program fails to extract images. They are using a different (proprietary) compression format, as described [in a similar project](https://github.com/snickerbockers/fp-assets).
 
 ## What you need to build
 
@@ -70,7 +69,7 @@ struct AssetEntryImage {
         float y; // Idk
     } ex_dimensions[ex_dimension_cnt];
     uint32_t size; // Size of the image data that follows
-    uint8_t  image_data[size]; // zlib-compressed image data
+    uint8_t  image_data[size]; // compressed image data (either zlib or proprietary algorithm; cyber shadow uses zlib)
 }
 ```
 Not valid C++ obviously but I hope you get the idea. I don't know what any of the floats do, they're probably used to change how it gets displayed ingame or something. I didn't reverse engineer that far (I mean, who'd want to dig through a bunch of inlined `stb_image` functions anyway).
@@ -88,7 +87,9 @@ struct AssetEntrySound {
     uint8_t  sound_data[size]; // Raw .ogg or .wav file depending on audio_type
 }
 ```
-Because these are literally .wav and .ogg files placed inside of the Assets file, they are trivial to extract once you find them.
+Because these are literally .wav and .ogg files placed inside of the Assets file, they are trivial to extract once you find them. 
+
+**In some games, only the `audio_type` and `size` fields are present!**
 
 ### `shader_offsets`
 These offsets point to pairs of shaders (vertex and fragment).
