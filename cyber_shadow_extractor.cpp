@@ -32,6 +32,7 @@ For more information, please refer to <http://unlicense.org/>
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/parsers.hpp>
 #include <boost/program_options/positional_options.hpp>
+#include <boost/program_options/value_semantic.hpp>
 #include <boost/program_options/variables_map.hpp>
 #include <boost/throw_exception.hpp>
 #include <boost/filesystem.hpp>
@@ -67,12 +68,39 @@ struct asset_offsets {
     uint32_t sizes;
 };
 
+enum class image_format {
+    INVALID,
+    ZLIB,
+    RAW,
+    CHOWIMG
+};
+
+image_format get_image_format(const std::string& name) {
+    if (name == "zlib") {
+        return image_format::ZLIB;
+    } else if (name == "chowimg") {
+        return image_format::CHOWIMG;
+    } else if (name == "raw") {
+        return image_format::RAW;
+    } else {
+        return image_format::INVALID;
+    }
+}
+
 int parse_args(po::variables_map& opts, int argc, char** argv) {
     po::options_description optdesc_named("Named options");
     optdesc_named.add_options()
         (
             "probe-offsets",
             "only find offsets and exit"
+        )
+        (
+            "image-format",
+            po::value<std::string>()->default_value("zlib"),
+            "how to handle image data in the archive:\n"
+            "- zlib (decompress with zlib)\n"
+            "- chowimg (decompress using custom algorhitm)\n"
+            "- raw (extract raw data without decompression)"
         )
         (
             "no-images",
@@ -140,7 +168,7 @@ float read_little_endian_f32(uint8_t* data) {
     return *(float*)(&tmp);
 }
 
-void extract_images(asset_offsets& offsets, uint8_t* mmap, const std::string& output_dir_path) {
+void extract_images(asset_offsets& offsets, uint8_t* mmap, const std::string& output_dir_path, image_format format) {
     if (offsets.images == INVALID_OFFSET) {
         std::cerr << "failed to find image offsets";
         return;
@@ -160,13 +188,30 @@ void extract_images(asset_offsets& offsets, uint8_t* mmap, const std::string& ou
         uint32_t size         = read_little_endian_u32(mmap + entry_offset + size_offset );
 
         unsigned long out_size = buffer_size;
-        int result = uncompress(temp_buffer, &out_size, mmap + entry_offset + image_data_offset, size);
-        if (result != Z_OK) {
-            std::cerr << "decompression failure" << std::endl;
-        } else {
-            auto filename = output_dir_path + "/image" + std::to_string(entry_number) + ".png";
-            stbi_write_png(filename.c_str(), width, height, 4, temp_buffer, width * 4);
-            // std::cout << "Writing to " << filename << std::endl;
+        if (format == image_format::ZLIB || format == image_format::CHOWIMG) {
+            bool decompression_success = false;
+            if (format == image_format::ZLIB) {
+                int result = uncompress(temp_buffer, &out_size, mmap + entry_offset + image_data_offset, size);
+                if (result != Z_OK) {
+                    std::cerr << "zlib decompression failure" << std::endl;
+                } else {
+                    decompression_success = true;
+                }
+            } else if (format == image_format::CHOWIMG) {
+                std::cerr << "chowimg NYI" << std::endl;
+            }
+            if (decompression_success) {
+                auto filename = output_dir_path + "/image" + std::to_string(entry_number) + ".png";
+                stbi_write_png(filename.c_str(), width, height, 4, temp_buffer, width * 4);
+                // std::cout << "Writing to " << filename << std::endl;
+                ++entry_number;
+            }
+        } else if (format == image_format::RAW) {
+            auto filename = output_dir_path + "/image" + std::to_string(entry_number) + "-" 
+              + std::to_string(width) + "x" + std::to_string(height) + ".bin";
+            FILE* out = fopen(filename.c_str(), "wb");
+            fwrite(mmap + entry_offset + image_data_offset, size, 1, out);
+            fclose(out);
             ++entry_number;
         }
     };
@@ -453,7 +498,12 @@ int main(int argc, char **argv) {
     }
 
     if (!opts.count("no-images")) {
-        extract_images(offsets, mmap, output_dir_path);
+        image_format format = get_image_format(opts["image-format"].as<std::string>());
+        if (format != image_format::INVALID) {
+            extract_images(offsets, mmap, output_dir_path, format);
+        } else {
+            std::cerr << "passed invalid image-format, not extracing images" << std::endl;
+        }
     }
     
     if (!opts.count("no-audio")) {
