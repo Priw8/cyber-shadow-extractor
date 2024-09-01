@@ -5,6 +5,7 @@
 #include <exception>
 #include <iostream>
 
+#include "stb/stb_image_write.h"
 #include "chowimg.hpp"
 
 namespace po = boost::program_options;
@@ -12,7 +13,7 @@ namespace po = boost::program_options;
 #define PROJECT_NAME "chowimg"
 
 void print_help() {
-    std::cout << "usage: " PROJECT_NAME " input.bin output.png" << std::endl;
+    std::cout << "usage: " PROJECT_NAME " input.bin width height output.png" << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -21,19 +22,27 @@ int main(int argc, char** argv) {
     po::options_description opt_desc;
     opt_desc.add_options()(
         "input",
-        
         "input file containing raw compressed data"
     )(
         "output",
         "where to write the output"
+    )(
+        "width",
+        po::value<int>(),
+        "width of the png image that should be created from raw data"
+    )(
+        "height",
+        po::value<int>(),
+        "height of the png image that should be created from raw data"
     );
 
     po::positional_options_description positional_desc;
-    positional_desc.add("input", 1).add("output", 1);
+    positional_desc.add("input", 1).add("width", 1).add("height", 1).add("output", 1);
 
     try {
         po::store(
-            po::command_line_parser(argc, argv).options(opt_desc).positional(positional_desc).run(),
+            po::command_line_parser(argc, argv)
+              .options(opt_desc).positional(positional_desc).run(),
             opts);
     } catch(std::exception& e) {
         std::cerr << e.what() << std::endl;
@@ -48,6 +57,13 @@ int main(int argc, char** argv) {
 
     auto& input_name = opts["input"].as<std::string>();
     auto& output_name = opts["output"].as<std::string>();
+
+    int width  = opts["width"].as<int>();
+    int height = opts["height"].as<int>();
+    if (width <= 0 || height <= 0) {
+        std::cerr << "invalid image dimensions" << std::endl;
+        return 1;
+    }
 
     FILE* input = fopen(input_name.c_str(), "rb");
     if (!input) {
@@ -65,14 +81,11 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    FILE* output = fopen(output_name.c_str(), "wb");
-    if (!output) {
-        std::cerr << "failed to open output file" << std::endl;
+    res = stbi_write_png(output_name.c_str(), width, height, 4, out_buffer.at(0), width * 4);
+    if (!res) {
+        std::cerr << "failed to write image to file " << output_name << std::endl;
         return 1;
     }
-
-    fwrite(out_buffer.at(0), out_buffer.tell(), 1, output);
-    fclose(output);
 
     return 0;
 }
