@@ -55,21 +55,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    fseek(input, 0, SEEK_END);
-    uint32_t buffer_size = ftell(input);
-    fseek(input, 0, SEEK_SET);
-    uint8_t* buffer = static_cast<uint8_t*>(malloc(buffer_size));
-    fread(buffer, buffer_size, 1, input);
+    Buffer in_buffer(input);
     fclose(input);
 
-    // Initial buffer size - it will be expanded if needed
-    uint32_t out_buffer_size = 0xffff;
-    uint8_t* out_buffer = static_cast<uint8_t*>(malloc(out_buffer_size));
+    Buffer out_buffer(0xffff);
 
-    uint32_t out_offset = 0;
-    uint32_t offset = 0;
-
-    int res = chowimg_read(out_buffer, out_buffer_size, out_offset, buffer, offset, buffer_size);
+    int res = chowimg_read(out_buffer, in_buffer, in_buffer.get_size());
     if (res) {
         return 1;
     }
@@ -80,7 +71,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    fwrite(out_buffer, out_offset, 1, output);
+    fwrite(out_buffer.at(0), out_buffer.tell(), 1, output);
     fclose(output);
 
     return 0;
