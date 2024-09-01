@@ -58,6 +58,7 @@ empty platform_offsets
 ### `image_offsets`
 An array of little-endian uint32_t (everything in the file is little endian) where each entry points to the image data that's further in the file. Said image data takes the following structure:
 ```cpp
+// NOTE!! this might not apply to all games' Assets.dat, it seems...
 struct AssetEntryImage {
     uint16_t x; // Width of image file
     uint16_t y; // Height of image file

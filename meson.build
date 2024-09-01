@@ -6,7 +6,8 @@ project('cyber-shadow-extractor', 'cpp',
 boost = dependency('boost', modules: ['program_options', 'filesystem'])
 zlib  = dependency('zlib')
 
-executable('cyber-shadow-extractor', 'cyber_shadow_extractor.cpp', 'stb.cpp', 'util.cpp',
+executable('cyber-shadow-extractor', 
+  'cyber_shadow_extractor.cpp', 'stb.cpp', 'util.cpp', 'chowimg.cpp',
   install : true, dependencies: [ boost, zlib ])
 
 executable('chowimg', 'chowimg_standalone.cpp', 'chowimg.cpp', 'util.cpp', 'stb.cpp',

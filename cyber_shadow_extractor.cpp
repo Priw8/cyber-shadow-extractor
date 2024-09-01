@@ -50,6 +50,7 @@ For more information, please refer to <http://unlicense.org/>
 
 #include "stb/stb_image_write.h"
 #include "util.hpp"
+#include "chowimg.hpp"
 
 #define PROJECT_NAME "cyber-shadow-extractor"
 #define INVALID_OFFSET 0xffffffff
@@ -198,7 +199,7 @@ int parse_args(po::variables_map& opts, int argc, char** argv) {
     return 0;
 }
 
-void extract_images(asset_offsets& offsets, uint8_t* mmap, const std::string& output_dir_path, image_format format) {
+void extract_images(asset_offsets& offsets, Buffer& buffer, const std::string& output_dir_path, image_format format) {
     if (offsets.images == INVALID_OFFSET) {
         std::cerr << "failed to find image offsets";
         return;
@@ -206,50 +207,74 @@ void extract_images(asset_offsets& offsets, uint8_t* mmap, const std::string& ou
     
     // I don't know the size of the compressed data, so let's just get a 16mb buffer that should be large enough for everything
     constexpr const int buffer_size = 0x1000000;
-    uint8_t* temp_buffer = (uint8_t*)std::malloc(buffer_size); 
+    Buffer temp_buffer(buffer_size);
+
     int entry_number = 0;
+    int extracted_number = 0;
     for (uint32_t i=offsets.images; i<offsets.sounds; i+=4) {
-        uint32_t entry_offset = read_little_endian_u32(mmap + i);
-        uint16_t width        = read_little_endian_u16(mmap + entry_offset);
-        uint16_t height       = read_little_endian_u16(mmap + entry_offset + 2);
-        uint8_t  extra_float_count = *(mmap + entry_offset + 12);
+        buffer.seek(i, Buffer::SET);
+        uint32_t entry_offset = buffer.read_u32();
+        buffer.seek(entry_offset, Buffer::SET);
+        
+        uint16_t width        = buffer.read_u16();
+        uint16_t height       = buffer.read_u16();
+
+        buffer.seek(entry_offset + 12, Buffer::SET);
+        uint8_t  extra_float_count = buffer.read_u8();
         uint32_t size_offset  = 13 + extra_float_count * 8;
         uint32_t image_data_offset = size_offset + 4;
-        uint32_t size         = read_little_endian_u32(mmap + entry_offset + size_offset );
+
+        buffer.seek(entry_offset + size_offset, Buffer::SET);
+        uint32_t size         = buffer.read_u32();
+        uint8_t* image_data   = buffer.at(entry_offset + image_data_offset);
 
         unsigned long out_size = buffer_size;
         if (format == image_format::ZLIB || format == image_format::CHOWIMG) {
             bool decompression_success = false;
             if (format == image_format::ZLIB) {
-                int result = uncompress(temp_buffer, &out_size, mmap + entry_offset + image_data_offset, size);
+                int result = uncompress(temp_buffer.at(0), &out_size, image_data, size);
                 if (result != Z_OK) {
                     std::cerr << "zlib decompression failure" << std::endl;
                 } else {
                     decompression_success = true;
                 }
             } else if (format == image_format::CHOWIMG) {
-                std::cerr << "chowimg NYI" << std::endl;
+                temp_buffer.seek(0, Buffer::SET);
+                buffer.seek(entry_offset + image_data_offset, Buffer::SET);
+                int result = chowimg_read(temp_buffer, buffer, 
+                    entry_offset + image_data_offset + size);
+
+                if (result) {
+                    std::cerr << "chowimg decompression failure for image" << entry_number 
+                      << " (" << width << "x" << height << "), image_offset=0x"
+                      << std::hex << entry_offset + image_data_offset << ", entry_offset=0x" 
+                      << entry_offset << std::dec << std::endl;
+                } else {
+                    decompression_success = true;
+                }
             }
             if (decompression_success) {
                 auto filename = output_dir_path + "/image" + std::to_string(entry_number) + ".png";
-                stbi_write_png(filename.c_str(), width, height, 4, temp_buffer, width * 4);
-                // std::cout << "Writing to " << filename << std::endl;
-                ++entry_number;
+                stbi_write_png(filename.c_str(), width, height, 4, temp_buffer.at(0), width * 4);
+                ++extracted_number;
             }
         } else if (format == image_format::RAW) {
             auto filename = output_dir_path + "/image" + std::to_string(entry_number) + "-" 
               + std::to_string(width) + "x" + std::to_string(height) + ".bin";
             FILE* out = fopen(filename.c_str(), "wb");
-            fwrite(mmap + entry_offset + image_data_offset, size, 1, out);
+            fwrite(image_data, size, 1, out);
             fclose(out);
-            ++entry_number;
+            ++extracted_number;
         }
+        ++entry_number;
     };
-    std::cout << "Wrote " << entry_number << " images" << std::endl;
-    std::free(temp_buffer);
+    std::cout << "Wrote " << extracted_number << " images" << std::endl;
 }
 
-void extract_audio(asset_offsets& offsets, uint8_t* mmap, const std::string& output_dir_path, sound_format format) {
+void extract_audio(
+  asset_offsets& offsets, Buffer& buffer, 
+  const std::string& output_dir_path, sound_format format
+) {
     if (offsets.sounds == INVALID_OFFSET) {
         std::cerr << "failed to find sound offsets";
         return;
@@ -259,23 +284,23 @@ void extract_audio(asset_offsets& offsets, uint8_t* mmap, const std::string& out
 
     int entry_number = 0;
     for (uint32_t i=offsets.sounds; i<offsets.fonts; i+=4) {
-        uint32_t entry_offset = read_little_endian_u32(mmap + i);
-        uint32_t audio_type   = read_little_endian_u32(mmap + entry_offset); //,
-                //  unknown1     = read_little_endian_u32(mmap + entry_offset + 4), 
-                //  sample_rate  = read_little_endian_u32(mmap + entry_offset + 8);
-        // uint8_t  unknown3     = *(mmap + entry_offset + 12);
-        uint32_t size         = read_little_endian_u32(mmap + entry_offset + sound_offsets.size);
-        // std::cout << "Found audio of type=" << audio_type << std::endl;
+        buffer.seek(i, Buffer::SET);
+        uint32_t entry_offset = buffer.read_u32();
+
+        buffer.seek(entry_offset, Buffer::SET);
+        uint32_t audio_type = buffer.read_u32();
+
+        buffer.seek(entry_number + sound_offsets.size, Buffer::SET);
+        uint32_t size = buffer.read_u32();
 
         if (audio_type == 0) {
             std::cerr << "Invalid audio type at 0x" << std::hex << entry_offset << std::endl;
         } else {
             auto& extension = audio_type == 1 ? extension_wav : extension_ogg;
             auto filename = output_dir_path + "/audio" + std::to_string(entry_number) + extension;
-            // std::cout << "Writing to " << filename << std::endl;
     
             FILE* out = std::fopen(filename.c_str(), "wb");
-            fwrite(mmap + entry_offset + sound_offsets.data, size, 1, out);
+            fwrite(buffer.at(entry_offset + sound_offsets.data), size, 1, out);
             fclose(out);
         }
         ++entry_number;
@@ -283,7 +308,7 @@ void extract_audio(asset_offsets& offsets, uint8_t* mmap, const std::string& out
     std::cout << "Wrote " << entry_number << " audio files" << std::endl;
 }
 
-void extract_shaders(asset_offsets& offsets, uint8_t* mmap, const std::string& output_dir_path) {
+void extract_shaders(asset_offsets& offsets, Buffer& buffer, const std::string& output_dir_path) {
     if (offsets.shaders == INVALID_OFFSET) {
         std::cerr << "failed to find shader offsets";
         return;
@@ -291,24 +316,26 @@ void extract_shaders(asset_offsets& offsets, uint8_t* mmap, const std::string& o
     
     int entry_number = 0;
     for (uint32_t i=offsets.shaders; i<offsets.files; i+=4) {
-        uint32_t entry_offset_vert = read_little_endian_u32(mmap + i);
-        uint32_t size_vert         = read_little_endian_u32(mmap + entry_offset_vert);
+        buffer.seek(i, Buffer::SET);
+        uint32_t entry_offset_vert = buffer.read_u32();
+
+        buffer.seek(entry_offset_vert, Buffer::SET);
+        uint32_t size_vert = buffer.read_u32();
     
         auto filename_vert = output_dir_path + "/shader" + std::to_string(entry_number) + ".vert";
-        // std::cout << "Writing to " << filename_vert << std::endl;
 
         FILE* vert = std::fopen(filename_vert.c_str(), "w");
-        fwrite(mmap + entry_offset_vert + 4, size_vert, 1, vert);
+        fwrite(buffer.at(entry_offset_vert + 4), size_vert, 1, vert);
         fclose(vert);
 
         uint32_t entry_offset_frag = entry_offset_vert + 4 + size_vert;
-        uint32_t size_frag         = read_little_endian_u32(mmap + entry_offset_frag);
+        buffer.seek(entry_offset_frag, Buffer::SET);
+        uint32_t size_frag = buffer.read_u32();
 
         auto filename_frag = output_dir_path + "/shader" + std::to_string(entry_number) + ".frag";
-        // std::cout << "Writing to " << filename_frag << std::endl;
 
         FILE* frag = std::fopen(filename_frag.c_str(), "w");
-        fwrite(mmap + entry_offset_frag + 4, size_frag, 1, frag);
+        fwrite(buffer.at(entry_offset_frag + 4), size_frag, 1, frag);
         fclose(frag);
 
         ++entry_number;
@@ -411,7 +438,12 @@ uint32_t find_u32(uint8_t* mmap, uint32_t val, uint32_t file_size, uint32_t defa
     return default_val;
 }
 
-uint32_t find_asset_offsets(asset_offsets& offsets, uint8_t* mmap, uint32_t file_size) {
+uint32_t find_asset_offsets(asset_offsets& offsets, Buffer& buffer) {
+    // For these operations in particular, I think working with
+    // the raw uint8_t* makes things more convenient.
+    uint8_t* mmap = buffer.at(0);
+    uint32_t file_size = buffer.get_size();
+
     // First, we need to find some data that we can easily identify; since shaders
     // are stored in plaintext, it'll be easiest to look for them. In particular,
     // we'll look for a `void main` string, since that should be present somewhere.
@@ -502,16 +534,12 @@ int main(int argc, char **argv) {
 
     FILE* file = std::fopen(input_file_path.c_str(), "rb");
 
-    std::fseek(file, 0, SEEK_END);
-    uint32_t file_size = std::ftell(file);
-    std::fseek(file, 0, SEEK_SET);
-
-    uint8_t* mmap = static_cast<uint8_t*>(malloc(file_size));
-    std::fread(mmap, file_size, 1, file);
+    Buffer input_buffer(file);
+    
     std::fclose(file);
 
     asset_offsets offsets;
-    if (find_asset_offsets(offsets, mmap, file_size)) {
+    if (find_asset_offsets(offsets, input_buffer)) {
         std::cerr << "failed to find asset_offsets" << std::endl;
         return 1;
     }
@@ -532,7 +560,7 @@ int main(int argc, char **argv) {
     if (!opts.count("no-images")) {
         image_format format = get_image_format(opts["image-format"].as<std::string>());
         if (format != image_format::INVALID) {
-            extract_images(offsets, mmap, output_dir_path, format);
+            extract_images(offsets, input_buffer, output_dir_path, format);
         } else {
             std::cerr << "passed invalid image-format, not extracing images" << std::endl;
         }
@@ -540,14 +568,12 @@ int main(int argc, char **argv) {
     
     if (!opts.count("no-audio")) {
         sound_format format = get_sound_format(opts["sound-format"].as<std::string>());
-        extract_audio(offsets, mmap, output_dir_path, format);
+        extract_audio(offsets, input_buffer, output_dir_path, format);
     }
 
     if (!opts.count("no-shaders")) {
-        extract_shaders(offsets, mmap, output_dir_path);    
+        extract_shaders(offsets, input_buffer, output_dir_path);    
     }
-
-    std::free(mmap);
 
     return 0;
 }
