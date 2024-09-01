@@ -49,6 +49,7 @@ For more information, please refer to <http://unlicense.org/>
 #include <zlib.h>
 
 #include "stb/stb_image_write.h"
+#include "util.hpp"
 
 #define PROJECT_NAME "cyber-shadow-extractor"
 #define INVALID_OFFSET 0xffffffff
@@ -195,19 +196,6 @@ int parse_args(po::variables_map& opts, int argc, char** argv) {
     }
 
     return 0;
-}
-
-uint32_t read_little_endian_u16(uint8_t* data) {
-    return *data | (*(data + 1) << 8);
-}
-
-uint32_t read_little_endian_u32(uint8_t* data) {
-    return *data | (*(data + 1) << 8) | (*(data + 2) << 16) | (*(data + 3) << 24);
-}
-
-float read_little_endian_f32(uint8_t* data) {
-    uint32_t tmp = (*data | (*(data + 1) << 8) | (*(data + 2) << 16) | (*(data + 3) << 24));
-    return *(float*)(&tmp);
 }
 
 void extract_images(asset_offsets& offsets, uint8_t* mmap, const std::string& output_dir_path, image_format format) {
