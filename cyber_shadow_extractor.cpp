@@ -234,7 +234,10 @@ void extract_images(asset_offsets& offsets, Buffer& buffer, const std::string& o
             if (format == image_format::ZLIB) {
                 int result = uncompress(temp_buffer.at(0), &out_size, image_data, size);
                 if (result != Z_OK) {
-                    std::cerr << "zlib decompression failure" << std::endl;
+                    std::cerr << "zlib decompression failure for image" << entry_number 
+                      << " (" << width << "x" << height << "), image_offset=0x"
+                      << std::hex << entry_offset + image_data_offset << ", entry_offset=0x" 
+                      << entry_offset << std::dec << std::endl;
                 } else {
                     decompression_success = true;
                 }
@@ -290,7 +293,7 @@ void extract_audio(
         buffer.seek(entry_offset, Buffer::SET);
         uint32_t audio_type = buffer.read_u32();
 
-        buffer.seek(entry_number + sound_offsets.size, Buffer::SET);
+        buffer.seek(entry_offset + sound_offsets.size, Buffer::SET);
         uint32_t size = buffer.read_u32();
 
         if (audio_type == 0) {
@@ -414,13 +417,14 @@ uint32_t shader_seek_forwards(uint8_t* mmap, uint32_t curr_offset, uint32_t file
 }
 
 uint32_t find_first_offset(uint8_t* mmap, uint32_t file_size) {
-    for (uint32_t i=0; i<file_size; ++i) {
-        if (mmap[i]) return i;
+    for (uint32_t i=0; i<file_size; i+=4) {
+        if (read_little_endian_u32(mmap + i)) return i;
     }
     // Turns out the file is all 0. How did we get here?
     return INVALID_OFFSET;
 }
 
+// Relies on shader_size being known
 uint32_t find_type_sizes(uint8_t* mmap, uint32_t shader_size, uint32_t curr_offset) {
     for (;curr_offset>=12; curr_offset-=4) {
         uint32_t v = read_little_endian_u32(mmap + curr_offset);
@@ -438,19 +442,14 @@ uint32_t find_u32(uint8_t* mmap, uint32_t val, uint32_t file_size, uint32_t defa
     return default_val;
 }
 
-uint32_t find_asset_offsets(asset_offsets& offsets, Buffer& buffer) {
-    // For these operations in particular, I think working with
-    // the raw uint8_t* makes things more convenient.
-    uint8_t* mmap = buffer.at(0);
-    uint32_t file_size = buffer.get_size();
-
+uint32_t find_type_sizes_shader_method(uint8_t* mmap, uint32_t file_size) {
     // First, we need to find some data that we can easily identify; since shaders
     // are stored in plaintext, it'll be easiest to look for them. In particular,
     // we'll look for a `void main` string, since that should be present somewhere.
     uint32_t shader_offset = find_shader_code_offset(mmap, file_size);
 
     if (shader_offset == INVALID_OFFSET) {
-        return 1;
+        return INVALID_OFFSET;
     }
 
     // We now need to measure the total size of the shader data - we're going to use that
@@ -485,14 +484,57 @@ uint32_t find_asset_offsets(asset_offsets& offsets, Buffer& buffer) {
     
     uint32_t first_offset = read_little_endian_u32(mmap + first_offset_location);
 
-    uint32_t type_sizes_offset = find_type_sizes(mmap, size_shaders, first_offset - 4);
+    return find_type_sizes(mmap, size_shaders, first_offset - 4);
+}
+
+uint32_t find_type_sizes_fallback_method(uint8_t* mmap, uint32_t file_size) {
+    // We can also simply use the fact that type_sizes is probably right before
+    // first entry's data. Unlike with the shader method we can't check if what we
+    // found is *actually* type_sizes, so some sanity checks need to be done 
+    // with whatever this function returns.
+    uint32_t first_offset_location = find_first_offset(mmap, file_size);
+    if (first_offset_location == INVALID_OFFSET) {
+        return INVALID_OFFSET;
+    }
+    
+    uint32_t first_offset = read_little_endian_u32(mmap + first_offset_location);
+    if (first_offset > file_size) {
+        // What?
+        return INVALID_OFFSET;
+    }
+
+    // Let's hope it's there!!
+    return first_offset - 24;
+}
+
+uint32_t find_asset_offsets(asset_offsets& offsets, Buffer& buffer) {
+    // For these operations in particular, I think working with
+    // the raw uint8_t* makes things more convenient.
+    uint8_t* mmap = buffer.at(0);
+    uint32_t file_size = buffer.get_size();
+
+    uint32_t type_sizes_offset = find_type_sizes_shader_method(mmap, file_size);
+    if (type_sizes_offset == INVALID_OFFSET) {
+        std::cerr << "Warning: failed to locate type_sizes using the primary method, " 
+            "potentially incorrect fallback will be used!" << std::endl;
+
+        // It's possible that there were no shaders, or that they aren't in plaintext.
+        type_sizes_offset = find_type_sizes_fallback_method(mmap, file_size);
+        if (type_sizes_offset == INVALID_OFFSET) {
+            return 1;
+        }
+    }
     
     uint32_t size_images    = read_little_endian_u32(mmap + type_sizes_offset);
     uint32_t size_sounds    = read_little_endian_u32(mmap + type_sizes_offset + 4);
     uint32_t size_fonts     = read_little_endian_u32(mmap + type_sizes_offset + 8);
-    // size_shaders already set
+    uint32_t size_shaders   = read_little_endian_u32(mmap + type_sizes_offset + 12);
     uint32_t size_files     = read_little_endian_u32(mmap + type_sizes_offset + 16);
     uint32_t size_platform  = read_little_endian_u32(mmap + type_sizes_offset + 20);
+
+    // Sanity check
+    if (file_size < size_images + size_sounds + size_fonts 
+      + size_shaders + size_files + size_platform) return 1;
 
     uint32_t data_platform = file_size - size_platform;
     uint32_t data_files    = data_platform - size_files;
