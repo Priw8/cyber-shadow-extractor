@@ -1,3 +1,6 @@
+# IMPORTANT NOTE - DEPRECATED
+This project has been superseded by a more-general [Chowdren extractor](https://github.com/Priw8/chowdren-extractor/). Please use that instead.
+
 # Cyber Shadow extractor
 
 This is a tool to extract data from the `Assets.dat` file of [Cyber Shadow](https://store.steampowered.com/app/861250/Cyber_Shadow/). As of the 
